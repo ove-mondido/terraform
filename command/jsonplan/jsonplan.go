@@ -1,6 +1,8 @@
 package jsonplan
 
 import (
+	"encoding/json"
+
 	"github.com/hashicorp/terraform/configs/configload"
 	"github.com/hashicorp/terraform/plans"
 	"github.com/hashicorp/terraform/states"
@@ -12,18 +14,18 @@ const FormatVersion = "0.1"
 
 // Plan is the top-level representation of the json format of a plan
 // It includes the complete config and current state
-type Plan struct {
+type plan struct {
 	FormatVersion   string            `json:"format_version"`
-	PriorState      Values            `json:"prior_state,omitempty"`
-	Config          map[string]Config `json:"configuration"`
-	PlannedValues   Values            `json:"planned_values"`
-	ProposedUnknown Values            `json:"proposed_unknown"`
-	ResourceChanges []ResourceChange  `json:"resource_changes"`
-	OutputChanges   map[string]Change `json:"output_changes"`
+	PriorState      json.RawMessage   `json:"prior_state,omitempty"`
+	Config          config            `json:"configuration"`
+	PlannedValues   values            `json:"planned_values"`
+	ProposedUnknown values            `json:"proposed_unknown"`
+	ResourceChanges []resourceChange  `json:"resource_changes"`
+	OutputChanges   map[string]change `json:"output_changes"`
 }
 
 // Change is the representation of a proposed change for an object
-type Change struct {
+type change struct {
 	// Actions are the actions that will be taken on the object selected by
 	// the properties below.
 	// Valid actions values are:
@@ -45,46 +47,19 @@ type Change struct {
 	// or "after" is unset (respectively). For ["no-op"], the before and after
 	// values are identical. The "after" value will be incomplete if there are
 	// values within it that won't be known until after apply.
-	Before Value
-	After  Value
+	Before json.RawMessage
+	After  json.RawMessage
 }
 
 // Values is the common representation of resolved values for both the prior
 // state (which is always complete) and the planned new state
-type Values struct {
-	Outputs      map[string]Output
-	RootModule   Module
-	ChildModules []Module
-}
-
-// Value .... is where I got lost.
-type Value struct{}
-
-// Config represents the complete configuration source
-type Config struct {
-	ProviderConfigs []ProviderConfig `json:"provider_config"`
-	RootModule      ConfigRootModule `json:"root_module"`
-}
-
-// ProviderConfig describes all of the provider configurations throughout the
-// configuration tree, flattened into a single map for convenience since
-// provider configurations are the one concept in Terraform that can span across
-// module boundaries.
-type ProviderConfig struct {
-	Name          string
-	Alias         string
-	ModuleAddress string
-	Expressions   Expressions
-}
-
-type ConfigRootModule struct {
-	Outputs     []map[string]Output
-	Resources   []Resource
-	ModuleCalls []ModuleCall
+type values struct {
+	Outputs    map[string]output
+	RootModule module
 }
 
 // Resource is the representation of a resource in the json plan
-type Resource struct {
+type resource struct {
 	// Address is the absolute resource address
 	Address string `json:"address"`
 
@@ -113,11 +88,11 @@ type Resource struct {
 	// resource, whose structure depends on the resource type schema.
 	// Any unknown values are omitted or set to null, making them indistinguishable
 	// from absent values.
-	Values []byte `json:"values"`
+	Values json.RawMessage `json:"values"`
 }
 
 //
-type ResourceChange struct {
+type resourceChange struct {
 	// Address is the absolute resource address
 	Address string `json:"address,omitempty"`
 
@@ -138,51 +113,74 @@ type ResourceChange struct {
 	Deposed bool `json:"deposed,omitempty"`
 
 	// Change describes the change that will be made to this object
-	Change Change
+	Change change
 }
 
 // Module is the representation of a module in state
 // This can be the root module or a child module
-type Module struct {
-	Resources []Resource
+type module struct {
+	Resources []resource
 
 	// Address is the absolute module address, omitted for the root module
 	Address string `json:"address,omitempty"`
 
 	// Each module object can optionally have its own nested "child_modules",
 	// recursively describing the full module tree.
-	ChildModules []Module `json:"child_modules,omitempty`
+	ChildModules []module `json:"child_modules,omitempty"`
 }
 
-type ModuleCall struct {
+type moduleCall struct {
 	ResolvedSource    string      `json:"resolved_source"`
-	Expressions       Expressions `json:"expressions"`
-	CountExpression   Expression  `json:"count_expression"`
-	ForEachExpression Expression  `json:"for_each_expression"`
-	Module            Module      `json:""`
+	Expressions       expressions `json:"expressions"`
+	CountExpression   expression  `json:"count_expression"`
+	ForEachExpression expression  `json:"for_each_expression"`
+	Module            module      `json:"module"`
 }
 
-type Output struct {
+type output struct {
 	Sensitive bool
-	Value     string
+	Value     json.RawMessage
 }
 
-type ConfigOutput struct {
+// Config represents the complete configuration source
+type config struct {
+	ProviderConfigs []providerConfig `json:"provider_config"`
+	RootModule      configRootModule `json:"root_module"`
+}
+
+// ProviderConfig describes all of the provider configurations throughout the
+// configuration tree, flattened into a single map for convenience since
+// provider configurations are the one concept in Terraform that can span across
+// module boundaries.
+type providerConfig struct {
+	Name          string
+	Alias         string
+	ModuleAddress string
+	Expressions   expressions
+}
+
+type configRootModule struct {
+	Outputs     []map[string]output
+	Resources   []resource
+	ModuleCalls []moduleCall
+}
+
+type configOutput struct {
 	Sensitive  bool
-	Expression Expression
+	Expression expression
 }
 
-type Expression struct {
-	ConstantValue string   `json:"constant_value,omitempty"`
-	References    []string `json:"references,omitempty`
-	Source        Source   `json:source`
+type expressions struct {
+	Expression map[string]expression
 }
 
-type Expressions struct {
-	Expression map[string]Expression
+type expression struct {
+	ConstantValue json.RawMessage `json:"constant_value,omitempty"`
+	References    []string        `json:"references,omitempty"`
+	Source        source          `json:"source"`
 }
 
-type Source struct {
+type source struct {
 	FileName string `json:"filename"`
 	Start    string `json:"start"`
 	End      string `json:"end"`
