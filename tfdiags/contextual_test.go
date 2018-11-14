@@ -28,6 +28,8 @@ baz "a" {
 baz "b" {
   bar = "boop"
 }
+tuple_of_one = ["one"]
+tuple_of_two = ["first", "22222"]
 `
 	f, parseDiags := hclsyntax.ParseConfig([]byte(testConfig), "test.tf", hcl.Pos{Line: 1, Column: 1})
 	if len(parseDiags) != 0 {
@@ -139,10 +141,58 @@ baz "b" {
 				Filename: "somewhere_else.tf",
 			},
 		},
+		{
+			AttributeValue(
+				Error,
+				"tuple_of_one.0",
+				"detail",
+				cty.Path{
+					cty.GetAttrStep{Name: "tuple_of_one"},
+					cty.IndexStep{Key: cty.NumberIntVal(0)},
+				},
+			),
+			&SourceRange{
+				Filename: "test.tf",
+				Start:    SourcePos{Line: 17, Column: 17, Byte: 137},
+				End:      SourcePos{Line: 17, Column: 22, Byte: 142},
+			},
+		},
+		{
+			AttributeValue(
+				Error,
+				"tuple_of_two.0",
+				"detail",
+				cty.Path{
+					cty.GetAttrStep{Name: "tuple_of_two"},
+					cty.IndexStep{Key: cty.NumberIntVal(0)},
+				},
+			),
+			&SourceRange{
+				Filename: "test.tf",
+				Start:    SourcePos{Line: 18, Column: 17, Byte: 160},
+				End:      SourcePos{Line: 18, Column: 24, Byte: 167},
+			},
+		},
+		{
+			AttributeValue(
+				Error,
+				"tuple_of_two.1",
+				"detail",
+				cty.Path{
+					cty.GetAttrStep{Name: "tuple_of_two"},
+					cty.IndexStep{Key: cty.NumberIntVal(1)},
+				},
+			),
+			&SourceRange{
+				Filename: "test.tf",
+				Start:    SourcePos{Line: 18, Column: 26, Byte: 169},
+				End:      SourcePos{Line: 18, Column: 33, Byte: 176},
+			},
+		},
 	}
 
 	for i, tc := range testCases {
-		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.Diag.Description()), func(t *testing.T) {
 			var diags Diagnostics
 			diags = diags.Append(tc.Diag)
 			gotDiags := diags.InConfigBody(f.Body)
