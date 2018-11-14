@@ -1605,7 +1605,12 @@ func (m schemaMap) validatePrimitive(
 	}
 
 	if schema.ValidateFunc != nil {
-		return schema.ValidateFunc(decoded, k)
+		warns, errs := schema.ValidateFunc(decoded, k)
+		// TODO: Wrap in AttributeError
+		for i, err := range errs {
+			errs[i] = NewAttributeError(k, err)
+		}
+		return warns, errs
 	}
 
 	return nil, nil

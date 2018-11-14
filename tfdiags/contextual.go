@@ -1,7 +1,10 @@
 package tfdiags
 
 import (
+	"log"
+
 	"github.com/hashicorp/hcl2/hcl"
+	"github.com/kr/pretty"
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/gocty"
 )
@@ -130,18 +133,18 @@ func (d *attributeDiagnostic) ElaborateFromConfigBody(body hcl.Body) Diagnostic 
 	// more convenient than arranging for source location information to be
 	// propagated to every place in Terraform, and this happens only in the
 	// presence of errors where performance isn't a concern.
-
-	traverse := d.attrPath[:len(d.attrPath)-1]
-	final := d.attrPath[len(d.attrPath)-1]
+	traverse := d.attrPath[:]
+	log.Printf("[DEBUG] ElaborateFromConfigBody called (traversing over %d steps)", len(traverse))
 
 	// If we have more than one step then we'll first try to traverse to
 	// a child body corresponding to the requested path.
 	for i := 0; i < len(traverse); i++ {
+		idx := i
 		step := traverse[i]
+		log.Printf("[DEBUG] %d. step is of type %T", idx, step)
 
 		switch tStep := step.(type) {
 		case cty.GetAttrStep:
-
 			var next cty.PathStep
 			if i < (len(traverse) - 1) {
 				next = traverse[i+1]
@@ -151,6 +154,7 @@ func (d *attributeDiagnostic) ElaborateFromConfigBody(body hcl.Body) Diagnostic 
 			var indexType cty.Type
 			var indexVal cty.Value
 			if nextIndex, ok := next.(cty.IndexStep); ok {
+				log.Printf("[DEBUG] (%d.) Next step is IndexStep", idx)
 				indexVal = nextIndex.Key
 				indexType = indexVal.Type()
 				i++ // skip over the index on subsequent iterations
@@ -158,12 +162,14 @@ func (d *attributeDiagnostic) ElaborateFromConfigBody(body hcl.Body) Diagnostic 
 
 			var blockLabelNames []string
 			if indexType == cty.String {
+				log.Printf("[DEBUG] (%d.) Next IndexStep's type is cty.String", idx)
 				// Map traversal means we expect one label for the key.
 				blockLabelNames = []string{"key"}
 			}
 
 			// For intermediate steps we expect to be referring to a child
 			// block, so we'll attempt decoding under that assumption.
+			log.Printf("[DEBUG] (%d.) Looking for child blocks", idx)
 			content, _, contentDiags := body.PartialContent(&hcl.BodySchema{
 				Blocks: []hcl.BlockHeaderSchema{
 					{
@@ -177,6 +183,7 @@ func (d *attributeDiagnostic) ElaborateFromConfigBody(body hcl.Body) Diagnostic 
 				ret.subject = &subject
 				return &ret
 			}
+			log.Printf("[DEBUG] (%d.) Found %d child blocks", idx, len(content.Blocks))
 			filtered := make([]*hcl.Block, 0, len(content.Blocks))
 			for _, block := range content.Blocks {
 				if block.Type == tStep.Name {
@@ -184,7 +191,11 @@ func (d *attributeDiagnostic) ElaborateFromConfigBody(body hcl.Body) Diagnostic 
 				}
 			}
 			if len(filtered) == 0 {
+				// Step doesn't refer to a block
+				log.Printf("[DEBUG] (%d.) No block found, skipping...", idx)
+				continue
 			}
+			log.Printf("[DEBUG] (%d.) Checking index type...", idx)
 
 			switch indexType {
 			case cty.NilType: // no index at all
@@ -242,13 +253,23 @@ func (d *attributeDiagnostic) ElaborateFromConfigBody(body hcl.Body) Diagnostic 
 	subject := SourceRangeFromHCL(body.MissingItemRange())
 	ret.subject = &subject
 
+	final := d.attrPath[len(d.attrPath)-1]
+
+	idxStep, hasIdx := final.(cty.IndexStep)
+	if hasIdx && len(d.attrPath) >= 2 {
+		final = d.attrPath[len(d.attrPath)-2]
+	}
+
 	// Once we get here, "final" should be a GetAttr step that maps to an
 	// attribute in our current body.
+	log.Println("[DEBUG] Checking if final step is cty.GetAttrStep")
 	finalStep, isAttr := final.(cty.GetAttrStep)
 	if !isAttr {
+		log.Println("[DEBUG] Final step is NOT cty.GetAttrStep")
 		return &ret
 	}
 
+	log.Printf("[DEBUG] Parsing out attributes for %q", finalStep.Name)
 	content, _, contentDiags := body.PartialContent(&hcl.BodySchema{
 		Attributes: []hcl.AttributeSchema{
 			{
@@ -261,8 +282,29 @@ func (d *attributeDiagnostic) ElaborateFromConfigBody(body hcl.Body) Diagnostic 
 		return &ret
 	}
 
+	log.Printf("[DEBUG] Checking if attribute called %q exists", finalStep.Name)
+
 	if attr, ok := content.Attributes[finalStep.Name]; ok {
-		subject = SourceRangeFromHCL(attr.Expr.Range())
+		log.Printf("[DEBUG] Attribute %q found: %s", finalStep.Name, pretty.Sprint(attr))
+
+		if hasIdx {
+			items, _ := hcl.ExprList(attr.Expr)
+			log.Printf("[DEBUG] Looking for item in indexed attribute (total of %d items). Expr: %s",
+				len(items), pretty.Sprint(attr.Expr))
+
+			var idx int
+			err := gocty.FromCtyValue(idxStep.Key, &idx)
+			if err != nil || idx >= len(items) {
+				log.Printf("[DEBUG] Index %d not found; err: %s", idx, err)
+				subject := SourceRangeFromHCL(body.MissingItemRange())
+				ret.subject = &subject
+				return &ret
+			}
+
+			subject = SourceRangeFromHCL(items[idx].Range())
+		} else {
+			subject = SourceRangeFromHCL(attr.Expr.Range())
+		}
 		ret.subject = &subject
 	}
 
