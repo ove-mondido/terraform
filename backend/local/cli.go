@@ -16,15 +16,15 @@ func (b *Local) CLIInit(opts *backend.CLIOpts) error {
 
 	// configure any new cli options
 	if opts.StatePath != "" {
-		b.StatePath = opts.StatePath
+		b.OverrideStatePath = opts.StatePath
 	}
 
 	if opts.StateOutPath != "" {
-		b.StateOutPath = opts.StateOutPath
+		b.OverrideStateOutPath = opts.StateOutPath
 	}
 
 	if opts.StateBackupPath != "" {
-		b.StateBackupPath = opts.StateBackupPath
+		b.OverrideStateBackupPath = opts.StateBackupPath
 	}
 
 	return nil
